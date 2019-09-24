@@ -88,23 +88,23 @@ classdef misc_halo_analysis
             
         end
         
-        % return a data struct including all necessary fields for future
-        % calculation/analysis
-        function data = read_match_data()
-            matchfile = misc_halo_analysis.read_file_match;
-            for i_date = 1:numel(matchfile)
-                cdpdata = misc_halo_analysis.read_cdp_data(matchfile(i_date).cdpname);
-                casdata = misc_halo_analysis.read_cas_data(matchfile(i_date).casname);
-                adlrdata = misc_halo_analysis.read_adlr_data(matchfile(i_date).adlrname);
+        
+        
+        function time = common_utcsec(t1,t2,t3)
+            time = unique([t1,t2,t3]);
+            indx = false(size(time));
+            for i=1:numel(time)
+                if ismember(time(i), t1) && ismember(time(i), t2) && ismember(time(i), t3)
+                    indx(i) = true;
+                end
             end
-            
-            % do data filter based on the utcsec
+            time = time(indx);
         end
         
         function cdpdata = read_cdp_data(cpdname)
             file = csvread(cpdname,3,0);
             cdpdata = make_empty_struct_from_cell({'utcsec','meandp','nconc'});
-            cdpdata.utcsec = file(:,1);
+            cdpdata.utcsec = fix(file(:,1));
             cdpdata.meandp = file(:,2);
             
             lowdp = misc_halo_analysis.cdp_diameter.low;
@@ -121,7 +121,7 @@ classdef misc_halo_analysis
         function casdata = read_cas_data(casname)
             file = csvread(casname, 3, 0);
             casdata = make_empty_struct_from_cell({'utcsec','meandp','nconc','lwc'});
-            casdata.utcsec = file(:,1);
+            casdata.utcsec = fix(file(:,1));
             casdata.meandp = zeros(size(casdata.utcsec));
             casdata.nconc = zeros(size(casdata.utcsec));
             casdata.lwc = file(:,end-3);
@@ -147,13 +147,55 @@ classdef misc_halo_analysis
         function adlrdata = read_adlr_data(adlrname)
             file = csvread(adlrname, 3, 0);
             adlrdata = make_empty_struct_from_cell({'utcsec','temp','w','alt'});
-            adlrdata.utcsec = file(:,1);
+            adlrdata.utcsec = fix(file(:,1));
             adlrdata.alt = file(:,5);
-            adlrdata.temp = file(:,12);
+            adlrdata.temp = file(:,21);
             adlrdata.w = file(:,18);
             adlrdata.w(adlrdata.w<=-100) = nan;
             adlrdata.temp(adlrdata.temp<=-100) = nan;
         end
+        
+        function struc_field = struct_filter(istruc, indx, fieldname)
+            struc_field = extractfield(istruc, fieldname);
+            struc_field = struc_field(indx);
+        end
         %%%%%%%%%%%%%%%%%%%
+        % Make methods    %
+        %%%%%%%%%%%%%%%%%%%
+        
+        % return a data struct including all necessary fields for future
+        % calculation/analysis
+        function make_match_data()
+            matchfile = misc_halo_analysis.read_file_match;
+            match = make_empty_struct_from_cell({'utcsec','alt','w','temp','lwc','cas_meandp','cas_nconc','cdp_meandp','cdp_nconc','date'});
+            for i_date = 1:numel(matchfile)
+                cdpdata = misc_halo_analysis.read_cdp_data(matchfile(i_date).cdpname);
+                casdata = misc_halo_analysis.read_cas_data(matchfile(i_date).casname);
+                adlrdata = misc_halo_analysis.read_adlr_data(matchfile(i_date).adlrname);
+                % do data filter based on the utcsec
+                match(i_date).date = matchfile(i_date).date;
+                match(i_date).utcsec = misc_halo_analysis.common_utcsec(extractfield(cdpdata,'utcsec'), extractfield(casdata,'utcsec'), extractfield(adlrdata,'utcsec'));
+                
+                cdp_indx = ismember(cdpdata.utcsec, match(i_date).utcsec);
+                match(i_date).cdp_meandp = misc_halo_analysis.struct_filter(cdpdata, cdp_indx, 'meandp');
+                match(i_date).cdp_nconc = misc_halo_analysis.struct_filter(cdpdata, cdp_indx, 'nconc');
+                cas_indx = ismember(casdata.utcsec, match(i_date).utcsec);
+                match(i_date).cas_meandp = misc_halo_analysis.struct_filter(casdata, cas_indx, 'meandp');
+                match(i_date).cas_nconc = misc_halo_analysis.struct_filter(casdata, cas_indx,'nconc');
+                match(i_date).lwc = misc_halo_analysis.struct_filter(casdata, cas_indx, 'lwc');
+                adlr_indx = ismember(adlrdata.utcsec, match(i_date).utcsec);
+                match(i_date).temp = misc_halo_analysis.struct_filter(adlrdata, adlr_indx,'temp');
+                match(i_date).w = misc_halo_analysis.struct_filter(adlrdata, adlr_indx, 'w');
+                match(i_date).alt = misc_halo_analysis.struct_filter(adlrdata, adlr_indx,'alt');
+            end
+            save('halo_match.mat','match');
+        end
+        
+        function make_supersaturation()
+            data = load('halo_match.mat');
+            match = data.match;
+            
+        end
+        
     end
 end
