@@ -105,7 +105,7 @@ classdef misc_halo_analysis
             file = csvread(cpdname,3,0);
             cdpdata = make_empty_struct_from_cell({'utcsec','meandp','nconc'});
             cdpdata.utcsec = fix(file(:,1));
-            cdpdata.meandp = file(:,2);
+            cdpdata.meandp = file(:,2)/2;% convert from diameter to radius
             
             lowdp = misc_halo_analysis.cdp_diameter.low;
             updp = misc_halo_analysis.cdp_diameter.up;
@@ -113,9 +113,12 @@ classdef misc_halo_analysis
             nconc = zeros(size(cdpdata.meandp));
             for i_bin = 1:numel(lowdp)
                 bin_indx = i_bin+3;
-                nconc = nconc + file(:,bin_indx)*dlogdp(i_bin);
+                nconc = nconc + file(:,bin_indx)./file(:,3); %*dlogdp(i_bin)./file(:,3);
             end
             cdpdata.nconc = nconc;
+            % remove the filling value
+            cdpdata.meandp(cdpdata.meandp >10000 | cdpdata.meandp <0 )= nan;
+            cdpdata.nconc(cdpdata.nconc > 10000 | cdpdata.nconc < 0) = nan;
         end
         
         function casdata = read_cas_data(casname)
@@ -128,7 +131,7 @@ classdef misc_halo_analysis
             casdata.lwc(casdata.lwc<0) = nan;
             lowdp = misc_halo_analysis.cas_diameter.low;
             updp = misc_halo_analysis.cas_diameter.up;
-            meandp = (lowdp+updp)/2;
+            meandp = (lowdp+updp)/2/2;%convert from diameter to radius
             nconc = zeros(size(casdata.utcsec));
             meandp_time_nconc = zeros(size(casdata.utcsec));
             for i_bin = 3:numel(lowdp)
@@ -155,10 +158,16 @@ classdef misc_halo_analysis
             adlrdata.temp(adlrdata.temp<=-100) = nan;
         end
         
-        function struc_field = struct_filter(istruc, indx, fieldname)
-            struc_field = extractfield(istruc, fieldname);
-            struc_field = struc_field(indx);
+        function struc_field = struct_filter(istruc, target_sec, fieldname)
+            istruc_field = extractfield(istruc, fieldname);
+            istruc_utcsec = extractfield(istruc, 'utcsec');
+            struc_field = nan(size(target_sec));
+            for i=1:numel(target_sec)
+                indx = istruc_utcsec == target_sec(i);
+                struc_field(i) = nanmean(istruc_field(indx));
+            end
         end
+        
         %%%%%%%%%%%%%%%%%%%
         % Make methods    %
         %%%%%%%%%%%%%%%%%%%
@@ -176,17 +185,17 @@ classdef misc_halo_analysis
                 match(i_date).date = matchfile(i_date).date;
                 match(i_date).utcsec = misc_halo_analysis.common_utcsec(extractfield(cdpdata,'utcsec'), extractfield(casdata,'utcsec'), extractfield(adlrdata,'utcsec'));
                 
-                cdp_indx = ismember(cdpdata.utcsec, match(i_date).utcsec);
-                match(i_date).cdp_meandp = misc_halo_analysis.struct_filter(cdpdata, cdp_indx, 'meandp');
-                match(i_date).cdp_nconc = misc_halo_analysis.struct_filter(cdpdata, cdp_indx, 'nconc');
-                cas_indx = ismember(casdata.utcsec, match(i_date).utcsec);
-                match(i_date).cas_meandp = misc_halo_analysis.struct_filter(casdata, cas_indx, 'meandp');
-                match(i_date).cas_nconc = misc_halo_analysis.struct_filter(casdata, cas_indx,'nconc');
-                match(i_date).lwc = misc_halo_analysis.struct_filter(casdata, cas_indx, 'lwc');
-                adlr_indx = ismember(adlrdata.utcsec, match(i_date).utcsec);
-                match(i_date).temp = misc_halo_analysis.struct_filter(adlrdata, adlr_indx,'temp');
-                match(i_date).w = misc_halo_analysis.struct_filter(adlrdata, adlr_indx, 'w');
-                match(i_date).alt = misc_halo_analysis.struct_filter(adlrdata, adlr_indx,'alt');
+                %cdp_indx = ismember(cdpdata.utcsec, match(i_date).utcsec);
+                match(i_date).cdp_meandp = misc_halo_analysis.struct_filter(cdpdata, match(i_date).utcsec, 'meandp');
+                match(i_date).cdp_nconc = misc_halo_analysis.struct_filter(cdpdata, match(i_date).utcsec, 'nconc');
+                %cas_indx = ismember(casdata.utcsec, match(i_date).utcsec);
+                match(i_date).cas_meandp = misc_halo_analysis.struct_filter(casdata, match(i_date).utcsec, 'meandp');
+                match(i_date).cas_nconc = misc_halo_analysis.struct_filter(casdata, match(i_date).utcsec,'nconc');
+                match(i_date).lwc = misc_halo_analysis.struct_filter(casdata, match(i_date).utcsec, 'lwc');
+                %adlr_indx = ismember(adlrdata.utcsec, match(i_date).utcsec);
+                match(i_date).temp = misc_halo_analysis.struct_filter(adlrdata, match(i_date).utcsec,'temp');
+                match(i_date).w = misc_halo_analysis.struct_filter(adlrdata, match(i_date).utcsec, 'w');
+                match(i_date).alt = misc_halo_analysis.struct_filter(adlrdata, match(i_date).utcsec,'alt');
             end
             save('halo_match.mat','match');
         end
@@ -194,8 +203,154 @@ classdef misc_halo_analysis
         function make_supersaturation()
             data = load('halo_match.mat');
             match = data.match;
-            
+            [a0,a1,a2,a3,a4,a5,a6,Rg,Ra,Cpa,Mma,Rv,Cpv,Mmv,pl,ps,Mms,alpha,w,Po,To,g,k_mu,k_ml]=recalculate_CAIPEEX_result.Constant;
+            for i_date=1:numel(match)
+                 T = match(i_date).temp;
+                 vel = match(i_date).w;
+                 Tc = T-To;
+                 Ho = match(i_date).alt;
+                 P = Po*exp(-g*Ho./(Ra*T));
+                 L=2.495e6-2.3e3*Tc;          % latent heat of evaporation
+                 D=(2.26e-5+1.5e-7*Tc)*Po./P;  % diffusion coeff.
+                 A = (g*L./(Cpa*Rv*T.^2)-g./(Ra*T));
+                 cdp_meandp = match(i_date).cdp_meandp;
+                 cdp_nconc = match(i_date).cdp_nconc;
+                 cdp_meandp(cdp_meandp==0) = nan; % avoid inf SS
+                 cdp_nconc(cdp_nconc==0) = nan;
+                 match(i_date).cdp_SS = A.*vel./(4*pi*D.*cdp_meandp.*cdp_nconc)*100;
+                 cas_meandp = match(i_date).cas_meandp;
+                 cas_nconc = match(i_date).cas_nconc;
+                 cas_meandp(cas_meandp == 0) =nan;
+                 cas_nconc(cas_nconc ==0) = nan;
+                 match(i_date).cas_SS = A.*vel./(4*pi*D.*cas_meandp.*cas_nconc)*100;
+            end
+            save('halo_match_ss.mat','match');
         end
         
+        %%%%%%%%%%%%%%%%%%%
+        % Plot methods    %
+        %%%%%%%%%%%%%%%%%%%
+        function plot_updraft_wind_supersaturation_oneday()
+            data = load('halo_match_ss.mat');
+            match = data.match(1);
+            figure;
+            hold on;
+            subplot(2,2,1);
+            line(match.cdp_meandp*2, match.cas_meandp*2,'linestyle','none','marker','o','markersize',2,'color',TolColorScheme.bright.('blue'));
+            line([0,50],[0,50],'linestyle','--','color',TolColorScheme.bright.('red'),'linewidth',2);
+            xlabel('CDP');
+            ylabel('CAS');
+            title('Mean Diameter (microns)');
+            
+            subplot(2,2,2);
+            line(match.cdp_nconc, match.cas_nconc,'linestyle','none','marker','o','markersize',2,'color',TolColorScheme.bright.('blue'));
+            line([0,2500],[0,2500],'linestyle','--','color',TolColorScheme.bright.('red'),'linewidth',2);
+            xlabel('CDP');
+            ylabel('CAS');
+            title('Number Concentration (#cm^{-3})');
+            
+            subplot(2,2,3);
+            line(match.cdp_SS, match.cas_SS,'linestyle','none','marker','o','markersize',2,'color',TolColorScheme.bright.('blue'));
+            line([0,0],[-100,100],'linestyle','--','color',TolColorScheme.bright.('red'),'linewidth',2);
+            line([-100,100],[0,0],'linestyle','--','color',TolColorScheme.bright.('red'),'linewidth',2);
+            xlabel('CDP');
+            ylabel('CAS');
+            xlim([-100,100]);
+            ylim([-100,100]);
+            title('Supersaturation (%)');
+            
+            figure;
+            scatter(match.cdp_SS, match.w,[],match.cdp_nconc, 'filled');
+            h = colorbar;
+            xlabel('SS,%');
+            ylabel('W, ms^{-1}');
+            ylabel(h,'Nc, cm^{-3}');
+            
+            figure;
+            %match.cdp_nconc(match.cdp_nconc>10) = nan;
+            [~,edges] = histcounts(log10(match.cdp_nconc));
+             histogram(match.cdp_nconc,10.^edges)
+            set(gca, 'xscale','log')
+            xlabel('CDP Nconc');
+            ylabel('frequencey');
+            
+            figure;
+            histogram(match.cdp_meandp*2);
+            xlabel('CDP Mean diameter');
+            ylabel('frequencey');
+            
+            figure;
+            [~,edges] = histcounts(log10(match.lwc));
+            histogram(match.lwc,10.^edges)
+            set(gca, 'xscale','log')
+            xlabel('CDP LWC (g cm^{-3})');
+            ylabel('frequencey');
+            
+            figure;
+            cloud_edge_indx = match.lwc < prctile(match.lwc,5);
+            cloud_non_edge_indx = match.lwc>= prctile(match.lwc,5);
+            ss_edge = match.cdp_SS(cloud_edge_indx);
+            ss_nonedge = match.cdp_SS(cloud_non_edge_indx);
+            subplot(1,2,1);
+            hold on;
+            histogram(ss_edge);
+            hold off;
+            
+            subplot(1,2,2);
+            hold on;
+            histogram(ss_nonedge);
+            hold off;
+        end
+        
+        function plot_hist_side_plot(x,y)
+            trace1 = struct(...
+                'x', x, ...
+                'y', y, ...
+                'mode', 'markers', ...
+                'name', 'points', ...
+                'marker', struct(...
+                'color', 'rgb(102,0,0)', ...
+                'size', 2, ...
+                'opacity', 0.4), ...
+                'type', 'scatter');
+            trace2 = struct(...
+                  'x', x, ...
+                  'name', 'x density', ...
+                  'marker', struct('color', 'rgb(102,0,0)'), ...
+                  'yaxis', 'y2', ...
+                  'type', 'histogram');
+            trace3 = struct(...
+                  'y', y, ...
+                  'name', 'y density', ...
+                  'marker', struct('color', 'rgb(102,0,0)'), ...
+                  'xaxis', 'x2', ...
+                  'type', 'histogram');  
+            data = {trace1, trace2, trace3};
+            layout = struct(...
+                'showlegend', false, ...
+                'autosize', false, ...
+                'width', 600, ...
+                'height', 550, ...
+                'xaxis', struct(...
+                  'domain', [0, 0.85], ...
+                  'showgrid', false, ...
+                  'zeroline', false), ...
+                'yaxis', struct(...
+                  'domain', [0, 0.85], ...
+                  'showgrid', false, ...
+                  'zeroline', false), ...
+                'margin', struct('t', 50), ...
+                'hovermode', 'closest', ...
+                'bargap', 0, ...
+                'xaxis2', struct(...
+                  'domain', [0.85, 1], ...
+                  'showgrid', false, ...
+                  'zeroline', false), ...
+                'yaxis2', struct(...
+                  'domain', [0.85, 1], ...
+                  'showgrid', false, ...
+                  'zeroline', false));
+             response = plotly(data, struct('layout', layout, 'fileopt', 'overwrite'));
+        end
     end
 end
