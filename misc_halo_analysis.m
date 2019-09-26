@@ -230,67 +230,73 @@ classdef misc_halo_analysis
         %%%%%%%%%%%%%%%%%%%
         % Plot methods    %
         %%%%%%%%%%%%%%%%%%%
-        function plot_updraft_wind_supersaturation_oneday()
+        function plot_updraft_wind_supersaturation_oneday(n)
             data = load('halo_match_ss.mat');
-            match = data.match(1);
+            match = data.match(n);
+            
+            figure;
+            indx = match.cdp_nconc>1;
+            scatter(match.cdp_SS(indx), match.w(indx),[],match.lwc(indx), 'filled');
+            h = colorbar;
+            caxis([0,0.1])
+            xlabel('SS,%');
+            ylabel('W, ms^{-1}');
+            ylabel(h,'LWC, g cm^{-3}');
+            
             figure;
             hold on;
             subplot(2,2,1);
-            line(match.cdp_meandp*2, match.cas_meandp*2,'linestyle','none','marker','o','markersize',2,'color',TolColorScheme.bright.('blue'));
-            line([0,50],[0,50],'linestyle','--','color',TolColorScheme.bright.('red'),'linewidth',2);
+            line(match.cdp_meandp*2, match.cas_meandp*2,'linestyle','none','marker','o','markersize',2,'color','blue');
+            line([0,50],[0,50],'linestyle','--','color','red','linewidth',2);
             xlabel('CDP');
             ylabel('CAS');
             title('Mean Diameter (microns)');
             
             subplot(2,2,2);
-            line(match.cdp_nconc, match.cas_nconc,'linestyle','none','marker','o','markersize',2,'color',TolColorScheme.bright.('blue'));
-            line([0,2500],[0,2500],'linestyle','--','color',TolColorScheme.bright.('red'),'linewidth',2);
+            line(match.cdp_nconc, match.cas_nconc,'linestyle','none','marker','o','markersize',2,'color','blue');
+            line([0,2500],[0,2500],'linestyle','--','color','red','linewidth',2);
             xlabel('CDP');
             ylabel('CAS');
             title('Number Concentration (#cm^{-3})');
             
             subplot(2,2,3);
-            line(match.cdp_SS, match.cas_SS,'linestyle','none','marker','o','markersize',2,'color',TolColorScheme.bright.('blue'));
-            line([0,0],[-100,100],'linestyle','--','color',TolColorScheme.bright.('red'),'linewidth',2);
-            line([-100,100],[0,0],'linestyle','--','color',TolColorScheme.bright.('red'),'linewidth',2);
+            line(match.cdp_SS, match.cas_SS,'linestyle','none','marker','o','markersize',2,'color','blue');
+            line([0,0],[-100,100],'linestyle','--','color','red','linewidth',2);
+            line([-100,100],[0,0],'linestyle','--','color','red','linewidth',2);
             xlabel('CDP');
             ylabel('CAS');
             xlim([-100,100]);
             ylim([-100,100]);
             title('Supersaturation (%)');
             
-            figure;
-            scatter(match.cdp_SS, match.w,[],match.cdp_nconc, 'filled');
-            h = colorbar;
-            xlabel('SS,%');
-            ylabel('W, ms^{-1}');
-            ylabel(h,'Nc, cm^{-3}');
+            
             
             figure;
             %match.cdp_nconc(match.cdp_nconc>10) = nan;
-            [~,edges] = histcounts(log10(match.cdp_nconc));
-             histogram(match.cdp_nconc,10.^edges)
+            [~,edges] = histcounts(log10(match.cdp_nconc(indx)));
+             histogram(match.cdp_nconc(indx),10.^edges)
             set(gca, 'xscale','log')
             xlabel('CDP Nconc');
             ylabel('frequencey');
             
             figure;
-            histogram(match.cdp_meandp*2);
+            histogram(match.cdp_meandp(indx)*2);
             xlabel('CDP Mean diameter');
             ylabel('frequencey');
             
             figure;
-            [~,edges] = histcounts(log10(match.lwc));
-            histogram(match.lwc,10.^edges)
+            [~,edges] = histcounts(log10(match.lwc(indx)));
+            histogram(match.lwc(indx),10.^edges)
             set(gca, 'xscale','log')
             xlabel('CDP LWC (g cm^{-3})');
             ylabel('frequencey');
             
             figure;
-            cloud_edge_indx = match.lwc < prctile(match.lwc,5);
-            cloud_non_edge_indx = match.lwc>= prctile(match.lwc,5);
-            ss_edge = match.cdp_SS(cloud_edge_indx);
-            ss_nonedge = match.cdp_SS(cloud_non_edge_indx);
+            cloud_edge_indx = match.lwc(indx) < prctile(match.lwc(indx),5);
+            cloud_non_edge_indx = match.lwc(indx)>= prctile(match.lwc(indx),5);
+            cdp_SS = match.cdp_SS(indx);
+            ss_edge = cdp_SS(cloud_edge_indx);
+            ss_nonedge = cdp_SS(cloud_non_edge_indx);
             subplot(1,2,1);
             hold on;
             histogram(ss_edge);
