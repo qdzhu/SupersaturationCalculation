@@ -46,14 +46,14 @@ classdef explore_model_results
             
             bin_diameter = zeros(17,1);
             bin_diameter(1) = 2;
-            for i=2:17
+            for i=2:15
                 bin_diameter(i) = bin_diameter(i-1)*2^(1/3);
             end
             
             varname = num2str([01:33].','ff1i%02d');
             total_weighted_var = zeros(size(qncloud));
             total_var = zeros(size(qncloud));
-            for i=1:17
+            for i=1:15
                 this_sd = ncread(wrfinfo.Filename,varname(i,:));
                 total_weighted_var = total_weighted_var + squeeze(this_sd(:,:,:,6))/2^(i-1)*bin_diameter(i);
                 total_var = total_var + squeeze(this_sd(:,:,:,6))/2^(i-1);
@@ -69,7 +69,6 @@ classdef explore_model_results
             lon = squeeze(lon(:,:,1));
             lat = ncread(wrfgeos.Filename,'XLAT');
             lat = squeeze(lat(:,:,1));
-            
             lon_bdy = [-60.8, -60.5];
             lat_bdy = [-3.3, -3.1];
             %%%% find the index to filter the study domain
@@ -159,8 +158,37 @@ classdef explore_model_results
             regionindx = lon >= lon_bdy(1) & lon <= lon_bdy(2) & lat <= lat_bdy(2) & lat >= lat_bdy(1);
             
             study_hour = 14:19;
-            data_fields = {'q','temp'};
-            data = make_empty_struct_from_cell(data_fields,nan(numel(study_hour)*12,sum(regionindx(:)) ,size(height,3)));
+
+            
+%             data_fields = {'q','temp'};
+%             data = make_empty_struct_from_cell(data_fields,nan(numel(study_hour)*12,sum(regionindx(:)) ,size(height,3)));
+            varname = num2str([01:33].','ff1i%02d');
+            
+            bin_diameter = zeros(15,1);
+            bin_diameter(1) = 2;
+            for i=2:15
+                bin_diameter(i) = bin_diameter(i-1)*2^(1/3);
+            end
+            
+            for j=1:2
+                for i=1:numel(study_hour)
+                    filedir = dir(fullfile(filepath,modelopt{j},sprintf('wrfout_subset_d01_2014-03-17_%02d*', study_hour(i))));
+                    wrfinfo = ncinfo(fullfile(filepath,modelopt{j},filedir(1).name));
+                    for k=1:15
+                        display(k);
+                        thisvarname = varname(k,:);
+                        this_sd = ncread(wrfinfo.Filename,varname(k,:))/2^(k-1);
+                        data.(thisvarname)(12*i-11:12*i,:,:) = explore_model_results.cut_by_region_indx(this_sd,regionindx);
+                    end
+                end
+                if j ==1
+                    PI = data;
+                else
+                    BG = data;
+                end
+                
+            end
+            save('read_wrf_study_domain_dsd','BG','PI','lon','lat','height','bin_diameter');
             
             for j=1:2
                 for i=1:numel(study_hour)
@@ -197,7 +225,6 @@ classdef explore_model_results
                     data.w(12*i-11:12*i,:,:) = (w_cut(:,:,1:end-1)+w_cut(:,:,2:end))/2;
                     latentrate = ncread(wrfinfo.Filename,'TEMPDIFFL');
                     data.lc_water(12*i-11:12*i,:,:) = explore_model_results.cut_by_region_indx(latentrate,regionindx);
-                    
                     filedir = dir(fullfile(filepath,modelopt{j},sprintf('wrfout_add_subset_d01_2014-03-17_%02d*', study_hour(i))));
                     wrfinfo = ncinfo(fullfile(filepath,modelopt{j},filedir(1).name));
                     latentrate_ice = ncread(wrfinfo.Filename,'TEMPDIFFI');
@@ -214,7 +241,59 @@ classdef explore_model_results
                     BG = data;
                 end
             end
-            save('read_wrf_study_domain','BG','PI','lon','lat','height');
+            save('read_wrf_study_domain_dsd','BG','PI','lon','lat','height');
+        end
+        
+        function make_aver_radius()
+            % data struct to save the output
+            output = load('wrf_supersaturation_comparison');
+            % read in the did data
+            data = load('read_wrf_study_domain_dsd');
+            fieldnames = {'PI','BG'};
+            varname = num2str([01:33].','ff1i%02d');
+            bin_diameter = data.bin_diameter;
+            for i = 1:numel(fieldnames)
+                strc = data.(fieldnames{i});
+                total_weight = zeros(size(strc.(varname(1,:))));
+                total_var = zeros(size(total_weight));
+                for k = 1:15
+                    total_weight = total_weight + strc.(varname(k,:))*bin_diameter(k);
+                    total_var = total_var + strc.(varname(k,:));
+                end
+                aver_radius = 0.5* total_weight./total_var;
+                output.(fieldnames{i}).aver_radius = aver_radius;
+                output.(fieldnames{i}).S_qss = output.(fieldnames{i}).S_qss_times_rmean./aver_radius;
+            end
+            
+        end
+        
+        function make_qss_ss()
+            output = load('wrf_supersaturation_comparison');
+            output = output.output;
+            data = load('read_wrf_study_domain_fan');
+            extra = load('read_wrf_study_domain');
+            pres = data.pres;
+            pres = repmat(pres,6,1);
+            [a0,a1,a2,a3,a4,a5,a6,Rg,Ra,Cpa,Mma,Rv,Cpv,Mmv,pl,ps,Mms,alpha,w,Po,To,g,k_mu,k_ml]=recalculate_CAIPEEX_result.Constant; 
+            
+            fieldnames = {'PI','BG'};
+            for i=1:numel(fieldnames)
+                temp = data.(fieldnames{i}).temp;
+                ndens = pres*100./(Ra*temp);
+                Tc = temp - To;
+                L=2.495e6-2.3e3*Tc;          % latent heat of evaporation
+                D=(2.26e-5+1.5e-7*Tc)*Po./(pres*1e2);  % diffusion coeff.
+                A = (g*L./(Cpa*Rv*temp.^2)-g./(Ra*temp));
+                vel = extra.(fieldnames{i}).w;
+                aver_diameter = output.(fieldnames{i}).aver_radius*2;
+                qncloud = extra.(fieldnames{i}).nconc.*ndens/1e6;
+                SS = A.*vel./(4*pi*D.*aver_diameter.*qncloud);% quasi-state supersaturation
+                output.(fieldnames{i}).S_qss = SS;
+                output.(fieldnames{i}).qncloud = qncloud;
+                output.(fieldnames{i}).vel = vel;
+            end
+            
+            save('wrf_supersaturation_comparison_v1.mat','output');
         end
         
         function make_fan_ss()
@@ -254,22 +333,391 @@ classdef explore_model_results
                 fprintf('Implements %d\n',i);
                 this_temp = convert_wrf_temperature(PI.temp(12*i-11:12*i,:,:), P,PB);
                 this_es=6.112*exp(17.67*(this_temp-273.15)./(this_temp-29.65));
-                this_qs = 0.622*this_es./(pres-29.65);
+                this_qs = 0.622*this_es./(pres-this_es);
                 this_q = PI.q(12*i-11:12*i,:,:);
                 this_ss = this_q./this_qs-1;
                 PI.ss_fan(12*i-11:12*i,:,:) = this_ss;
+                PI.temp(12*i-11:12*i,:,:) = this_temp;
                 
                 this_temp = convert_wrf_temperature(BG.temp(12*i-11:12*i,:,:), P,PB);
                 this_es=6.112*exp(17.67*(this_temp-273.15)./(this_temp-29.65));
-                this_qs = 0.622*this_es./(pres-29.65);
+                this_qs = 0.622*this_es./(pres-this_es);
                 this_q = BG.q(12*i-11:12*i,:,:);
                 this_ss = this_q./this_qs-1;
                 BG.ss_fan(12*i-11:12*i,:,:) = this_ss;
+                BG.temp(12*i-11:12*i,:,:) = this_temp;
             end
             
-            save('read_wrf_study_domain_fan','BG','PI','lon','lat','height');
+            save('read_wrf_study_domain_fan','BG','PI','lon','lat','height','pres');
         end
+        % when we compare the fan's ss against wrf ss, we find out fan's ss
+        % scatter wildly when wrf gives zeros values. The method here is to
+        % figure out why
+        function match_fan_wrf_ss()
+            data = load('read_wrf_study_domain.mat');
+            wrf = data.PI;
+            wrf_ss = data.PI.ss;
+            wrf_ss_nconc = data.PI.ss_nconc;
+            
+            data = load('read_wrf_study_domain_fan.mat');
+            pres = data.pres;
+            pres = repmat(pres,6,1,1);
+            PI = data.PI;
+            fan_ss = PI.ss_fan;
+            
+            % wrf_ss against wrf_ss_nconc
+            indx = wrf_ss_nconc ==0 & wrf_ss ~= 0;
+            wpres = pres(indx);
+            wtemp = PI.temp(indx);
+            
+            indx = wrf_ss == 0 | wrf_ss_nconc ==0;
+            wrf_ss(indx) = nan;
+            wrf_ss_nconc(indx) = nan;
+            % first look at the datasets
+            figure;
+            subplot(2,2,1);
+            hold on;
+            scatter(wrf_ss(:), wrf_ss_nconc(:),15, 'b', 'filled');
+            scatter(wrf_ss(indx), wrf_ss_nconc(indx),10,'y');
+            line([-1,0.8],[-1,0.8],'color','r','linewidth',1);
+            xlabel('WRF SS_1');
+            ylabel('WRF SS_2');
+            hold off;
+            
+            subplot(2,2,2);
+            scatter(fan_ss(:), wrf_ss(:),15, 'b', 'filled');
+            line([-1,0.8],[-1,0.8],'color','r','linewidth',1);
+            ylabel('WRF SS_1');
+            xlabel('Fan SS');
+            
+            subplot(2,2,3);
+            scatter(fan_ss(:), wrf_ss_nconc(:),15, 'b', 'filled');
+            line([-1,0.8],[-1,0.8],'color','r','linewidth',1);
+            ylabel('WRF SS_2');
+            xlabel('Fan SS');
+            
+        end
+        
+        function value_2d = reconst_spatial_pattern(value, lon, lat)
+            
+            modelopt = {'C_PI','C_BG'};
+            lon_bdy = [-60.8, -60.5];
+            lat_bdy = [-3.3, -3.1];
+            %%%% find the index to filter the study domain
+            regionindx = lon >= lon_bdy(1) & lon <= lon_bdy(2) & lat <= lat_bdy(2) & lat >= lat_bdy(1);
+            s_lon = lon(regionindx);
+            s_lat = lat(regionindx);
+             
+            value_2d = nan(size(lon));
+            value_2d(regionindx) = value;
+        end
+        
+        function make_cmp_3d()
+            % get longitude and latitude info
+            data = load('read_wrf_study_domain_fan.mat');
+            lon = data.lon;
+            lat = data.lat;
+            % extract out the datasets
+%             data = load('wrf_supersaturation_comparison_v1.mat');
+            output = load('wrf_lwc_data.mat');
+            bg_lwc = squeeze(output.wrf_lwc_data.BG_lwc);
+            pi_lwc = squeeze(output.wrf_lwc_data.PI_lwc);
+%             data.output.PI.lwc = pi_lwc;
+%             data.output.BG.lwc = bg_lwc;
+            
+            fieldnames = {'temp'};
+            PI = make_empty_struct_from_cell(fieldnames);
+            for i=1:numel(fieldnames)
+                PI.(fieldnames{i}) = nan(size(bg_lwc,1),size(lon,1),size(lon,2),size(bg_lwc,3));
+                for j=1:size(bg_lwc,1)
+                    for k=1:size(bg_lwc,3)
+                        PI.(fieldnames{i})(j,:,:,k) = ...
+                            explore_model_results.reconst_spatial_pattern...
+                            (data.PI.(fieldnames{i})(j,:,k), lon, lat);
+                    end
+                end
+            end
+            save('read_wrf_study_domain_3d_temp_pi.mat','PI','-v7.3');
+            for i=1:numel(fieldnames)
+                PI.(fieldnames{i}) = nan(size(bg_lwc,1),size(lon,1),size(lon,2),size(bg_lwc,3));
+                for j=1:size(bg_lwc,1)
+                    for k=1:size(bg_lwc,3)
+                        PI.(fieldnames{i})(j,:,:,k) = ...
+                            explore_model_results.reconst_spatial_pattern...
+                            (data.output.PI.(fieldnames{i})(j,:,k), lon, lat);
+                    end
+                end
+            end
+            save('read_wrf_study_domain_3d_pi.mat','PI','-v7.3');
+            for i=1:numel(fieldnames)
+                BG.(fieldnames{i}) = nan(size(bg_lwc,1),size(lon,1),size(lon,2),size(bg_lwc,3));
+                for j=1:size(bg_lwc,1)
+                    for k=1:size(bg_lwc,3)
+                        BG.(fieldnames{i})(j,:,:,k) = ...
+                            explore_model_results.reconst_spatial_pattern...
+                            (data.output.BG.(fieldnames{i})(j,:,k), lon, lat);
+                    end
+                end
+            end
+            % lwc
+            
+            save('read_wrf_study_domain_3d_bg.mat','BG','-v7.3');
+            
+        end
+        
         % plot procedure
+        function plot_cmp_3d()
+            data = load('read_wrf_study_domain_fan.mat');
+            lon = data.lon;
+            lat = data.lat;
+            height = data.height;
+            
+            data = load('read_wrf_study_domain_3d_pi');
+            pi = data.PI;
+         
+            vel = pi.vel;
+            vel(pi.lwc <= 1e-5) = nan;
+            s_fan = pi.S_fan;
+            s_fan(pi.lwc <= 1e-5) = nan;
+            s_qss = pi.S_qss;
+            s_qss(pi.lwc <= 1e-5) = nan;
+            
+            data = load('read_wrf_study_domain_3d_temp_pi');
+            temp = data.PI.temp;
+            temp(pi.lwc <= 1e-5) = nan;
+            
+            lon_bdy = [-60.9, -60.4];
+            lat_bdy = [-3.4, -3.0];
+            
+            % relationship between temperature and s_fan
+            
+            writerObj = VideoWriter('PI_filter_xz.avi');
+            writerObj.FrameRate = 4;
+            open(writerObj);
+
+            for i=1:size(vel,1)
+                
+                xlon = repmat(lon,1,1,66);
+                xlat = repmat(lat,1,1,66);
+                figure(1);
+                
+                subplot(1,3,1);
+                xvel = squeeze(vel(i,:,:,:));
+                scatter3(xlon(:), xlat(:), height(:)/1e3,  5, xvel(:));
+                h = colorbar;
+                caxis([-5,5]);
+                colormap(blue_red_cmap);
+                xlim(lon_bdy);
+                ylim(lat_bdy);
+                zlim([0,11]);
+                xlabel('Longitude');
+                ylabel('Latitude');
+                zlabel('Height (km)');
+                ylabel(h,'W (m/s)');
+                title('Vertical wind velocity (m/s)');
+                view(90,0);
+                
+                subplot(1,3,2);
+                xs_fan = squeeze(s_fan(i,:,:,:));
+                scatter3(xlon(:), xlat(:), height(:)/1e3,  5, xs_fan(:)*100);
+                h = colorbar;
+                caxis([-20,20]);
+                colormap(blue_red_cmap);
+                xlim(lon_bdy);
+                ylim(lat_bdy);
+                zlim([0,11]);
+                xlabel('Longitude');
+                ylabel('Latitude');
+                zlabel('Height (km)');
+                ylabel(h,'Supersaturation (%)');
+                title('Supersaturation from fan calculation (%)');
+                view(90,0);
+                
+                subplot(1,3,3);
+                xs_qss = squeeze(s_qss(i,:,:,:));
+                scatter3(xlon(:), xlat(:), height(:)/1e3,  5, xs_qss(:)*100);
+                h = colorbar;
+                caxis([-20,20]);
+                colormap(blue_red_cmap);
+                xlim(lon_bdy);
+                ylim(lat_bdy);
+                zlim([0,11]);
+                xlabel('Longitude');
+                ylabel('Latitude');
+                zlabel('Height (km)');
+                ylabel(h,'Supersaturation (%)');
+                title('Supersaturation from qss calculation (%)');
+                view(90,0);
+                
+                set(gcf,'Position',[100 100 1500 400]);
+                frame = getframe(gcf);
+                writeVideo(writerObj, frame);
+            end
+            
+            close(writerObj);
+        end
+        
+        function plot_cmp_temp_3d()
+            data = load('read_wrf_study_domain_fan.mat');
+            lon = data.lon;
+            lat = data.lat;
+            height = data.height;
+            
+            data = load('read_wrf_study_domain_3d_pi');
+            pi = data.PI;
+         
+            vel = pi.vel;
+            vel(pi.lwc <= 1e-5) = nan;
+            s_fan = pi.S_fan;
+            s_fan(pi.lwc <= 1e-5) = nan;
+            s_qss = pi.S_qss;
+            s_qss(pi.lwc <= 1e-5) = nan;
+            
+            data = load('read_wrf_study_domain_3d_temp_pi');
+            temp = data.PI.temp;
+            temp(pi.lwc <= 1e-5) = nan;
+            
+            lon_bdy = [-60.9, -60.4];
+            lat_bdy = [-3.4, -3.0];
+            
+            % relationship between temperature and s_fan
+            
+            writerObj = VideoWriter('PI_temp_ssfan.avi');
+            writerObj.FrameRate = 4;
+            open(writerObj);
+
+            for i=1:size(vel,1)
+                
+                xlon = repmat(lon,1,1,66);
+                xlat = repmat(lat,1,1,66);
+                figure(1);
+                
+                subplot(1,3,1);
+                xtemp = squeeze(temp(i,:,:,:));
+                scatter3(xlon(:), xlat(:), height(:)/1e3,  5, xtemp(:)-273);
+                h = colorbar;
+                caxis([-20,20]);
+                colormap(blue_red_cmap);
+                xlim(lon_bdy);
+                ylim(lat_bdy);
+                zlim([0,11]);
+                xlabel('Longitude');
+                ylabel('Latitude');
+                zlabel('Height (km)');
+                ylabel(h,'Temperature - 273 (K)');
+                title('Temperature -273 (K)');
+          
+                
+                subplot(1,3,2);
+                xs_fan = squeeze(s_fan(i,:,:,:));
+                scatter3(xlon(:), xlat(:), height(:)/1e3,  5, xs_fan(:)*100);
+                h = colorbar;
+                caxis([-20,20]);
+                colormap(blue_red_cmap);
+                xlim(lon_bdy);
+                ylim(lat_bdy);
+                zlim([0,11]);
+                xlabel('Longitude');
+                ylabel('Latitude');
+                zlabel('Height (km)');
+                ylabel(h,'Supersaturation (%)');
+                title('Supersaturation from fan calculation (%)');
+            
+                
+                subplot(1,3,3);
+                xs_qss = squeeze(s_qss(i,:,:,:));
+                scatter3(xlon(:), xlat(:), height(:)/1e3,  5, xs_qss(:)*100);
+                h = colorbar;
+                caxis([-20,20]);
+                colormap(blue_red_cmap);
+                xlim(lon_bdy);
+                ylim(lat_bdy);
+                zlim([0,11]);
+                xlabel('Longitude');
+                ylabel('Latitude');
+                zlabel('Height (km)');
+                ylabel(h,'Supersaturation (%)');
+                title('Supersaturation from qss calculation (%)');
+                
+                set(gcf,'Position',[100 100 1500 400]);
+                frame = getframe(gcf);
+                writeVideo(writerObj, frame);
+            end
+            
+            close(writerObj);
+        end
+        
+        function plot_cmp_fan_qss()
+            data = load('wrf_supersaturation_comparison_v1.mat');
+            PI = data.output.PI;
+            
+            indx = PI.qncloud(:) > 10; % cloud droplet number concentration>10 particles/cm^3
+            figure;
+            subplot(1,2,1);
+            hold on;
+            scatter(PI.S_fan(indx)*100, PI.S_qss(indx)*100,3,'MarkerFaceColor','none',...
+                'LineWidth',0.2,'MarkerEdgeColor','blue');
+            line([-20,20],[-20,20],'linestyle','-','color','r','linewidth',2);
+            line([-20,20],[0,0],'linestyle','--','color','r','linewidth',1);
+            line([0,0],[-20,80],'linestyle','--','color','r','linewidth',1);
+            xlim([-15,15]);
+            xlabel('Supersaturatin from Fan (%)');
+            ylabel('Supersaturation from Steady State (%)');
+            hold off;
+            
+            subplot(1,2,2);
+            hold on;
+            indx = PI.qncloud(:) > 3 & PI.S_qss(:) >0 & PI.S_fan(:)>0;
+            scatter(PI.S_fan(indx)*100, PI.S_qss(indx)*100,3,'MarkerFaceColor','none',...
+                'LineWidth',0.2,'MarkerEdgeColor','blue');
+            plot_fit_line(PI.S_fan(indx)*100, PI.S_qss(indx)*100);
+            xlabel('Supersaturatin from Fan (%)');
+            ylabel('Supersaturation from Steady State (%)');
+            hold off;
+        end
+        
+        function plot_cmp_fan_qss_v1()
+            data = load('wrf_supersaturation_comparison_v1.mat');
+            PI = data.output.PI;
+            
+            output = load('wrf_lwc_data.mat');
+            lwc = squeeze(output.wrf_lwc_data.PI_lwc);
+            indx = lwc(:) > 1e-5 & PI.qncloud(:) > 3 & PI.vel(:)>2; % cloud droplet number concentration>10 particles/cm^3
+            figure;
+            subplot(1,2,1);
+            hold on;
+            scatter(PI.S_fan(indx)*100, PI.S_qss(indx)*100,3,'MarkerFaceColor','none',...
+                'LineWidth',0.2,'MarkerEdgeColor','blue');
+            line([-20,20],[-20,20],'linestyle','-','color','r','linewidth',2);
+            line([-20,20],[0,0],'linestyle','--','color','r','linewidth',1);
+            line([0,0],[-20,80],'linestyle','--','color','r','linewidth',1);
+            ylim([-15,15]);
+            xlabel('Supersaturatin from Fan (%)');
+            ylabel('Supersaturation from Steady State (%)');
+            hold off;
+            
+            subplot(1,2,2);
+            hold on;
+            scatter(PI.S_fan(indx)*100, PI.S_qss(indx)*100,3,lwc(indx));
+            line([-20,20],[-20,20],'linestyle','-','color','r','linewidth',2);
+            line([-20,20],[0,0],'linestyle','--','color','r','linewidth',1);
+            line([0,0],[-20,80],'linestyle','--','color','r','linewidth',1);
+            ylim([-15,15]);
+            xlabel('Supersaturatin from Fan (%)');
+            ylabel('Supersaturation from Steady State (%)');
+            hold off;
+            
+            subplot(1,2,2);
+            hold on;
+            indx = PI.qncloud(:) > 3 & PI.S_qss(:) >0 & PI.S_fan(:)>0;
+            scatter(PI.S_fan(indx)*100, PI.S_qss(indx)*100,3,'MarkerFaceColor','none',...
+                'LineWidth',0.2,'MarkerEdgeColor','blue');
+            plot_fit_line(PI.S_fan(indx)*100, PI.S_qss(indx)*100);
+            xlabel('Supersaturatin from Fan (%)');
+            ylabel('Supersaturation from Steady State (%)');
+            hold off;
+        end
+        
         function plot_wrf_study_domain()
             data = load('read_wrf_study_domain_fan.mat');
             height = data.height;
