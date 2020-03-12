@@ -682,7 +682,7 @@ classdef explore_model_results
             
             output = load('wrf_lwc_data.mat');
             lwc = squeeze(output.wrf_lwc_data.PI_lwc);
-            indx = lwc(:) > 1e-5 & PI.qncloud(:) > 3 & PI.vel(:)>2; % cloud droplet number concentration>10 particles/cm^3
+            indx = lwc(:) > 1e-5 & PI.qncloud(:) > 3 ; % cloud droplet number concentration>10 particles/cm^3
             figure;
             subplot(1,2,1);
             hold on;
@@ -699,6 +699,8 @@ classdef explore_model_results
             subplot(1,2,2);
             hold on;
             scatter(PI.S_fan(indx)*100, PI.S_qss(indx)*100,3,lwc(indx));
+            h = colorbar;
+            caxis([0, 3e-4]);
             line([-20,20],[-20,20],'linestyle','-','color','r','linewidth',2);
             line([-20,20],[0,0],'linestyle','--','color','r','linewidth',1);
             line([0,0],[-20,80],'linestyle','--','color','r','linewidth',1);
@@ -707,7 +709,7 @@ classdef explore_model_results
             ylabel('Supersaturation from Steady State (%)');
             hold off;
             
-            subplot(1,2,2);
+            subplot(1,2,1);
             hold on;
             indx = PI.qncloud(:) > 3 & PI.S_qss(:) >0 & PI.S_fan(:)>0;
             scatter(PI.S_fan(indx)*100, PI.S_qss(indx)*100,3,'MarkerFaceColor','none',...
